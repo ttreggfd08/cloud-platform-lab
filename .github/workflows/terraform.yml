@@ -6,7 +6,6 @@ on:
       - main
   pull_request:
 
-# 這是 OIDC 的核心！允許 GitHub 產生短暫的 JWT Token 拿去跟 GCP 交換權限
 permissions:
   contents: read
   id-token: write 
@@ -28,9 +27,9 @@ jobs:
       id: auth
       uses: google-github-actions/auth@v2
       with:
-        # 這裡未來會換成真實建立的 WIF Provider ID
-        workload_identity_provider: 'projects/123456789/locations/global/workloadIdentityPools/github/providers/my-repo'
-        service_account: 'terraform-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com'
+        # WIF 終極護照！
+        workload_identity_provider: 'projects/717871666559/locations/global/workloadIdentityPools/github-pool/providers/github-provider'
+        service_account: 'tf-github-sa@project-ba42a5bc-01e3-4ef3-ab9.iam.gserviceaccount.com'
 
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
@@ -38,7 +37,7 @@ jobs:
     - name: Terraform Init
       run: terraform init
 
-    # 在 PR 的結尾自動生成 Plan 讓主管審核！
     - name: Terraform Plan
-      run: terraform plan -var="project_id=${{ secrets.GCP_PROJECT_ID }}"
+      # 直接寫死專案 ID 進行超快速 Demo
+      run: terraform plan -var="project_id=project-ba42a5bc-01e3-4ef3-ab9"
 
