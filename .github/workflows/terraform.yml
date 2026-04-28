@@ -1,0 +1,44 @@
+name: 'Terraform GitOps'
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+# 這是 OIDC 的核心！允許 GitHub 產生短暫的 JWT Token 拿去跟 GCP 交換權限
+permissions:
+  contents: read
+  id-token: write 
+
+jobs:
+  terraform-plan:
+    name: 'Terraform Plan'
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: ./enterprise_tf/envs/dev
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Authenticate to Google Cloud
+      id: auth
+      uses: google-github-actions/auth@v2
+      with:
+        # 這裡未來會換成真實建立的 WIF Provider ID
+        workload_identity_provider: 'projects/123456789/locations/global/workloadIdentityPools/github/providers/my-repo'
+        service_account: 'terraform-sa@YOUR_PROJECT_ID.iam.gserviceaccount.com'
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+
+    - name: Terraform Init
+      run: terraform init
+
+    # 在 PR 的結尾自動生成 Plan 讓主管審核！
+    - name: Terraform Plan
+      run: terraform plan -var="project_id=${{ secrets.GCP_PROJECT_ID }}"
+

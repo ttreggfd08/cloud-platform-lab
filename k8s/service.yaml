@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: flask-app-service
+  # 這個 annotation 是為了讓 GKE 的 Ingress 可以直接將流量打到 Pod 上 (NEG 機制)
+  # 這是 GKE Best Practice 之一，能減少一層 Iptables 的延遲
+  annotations:
+    cloud.google.com/neg: '{"ingress": true}'
+spec:
+  type: ClusterIP
+  selector:
+    app: flask-app
+  ports:
+  - port: 80
+    targetPort: 8080
+

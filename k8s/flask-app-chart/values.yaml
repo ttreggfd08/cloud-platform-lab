@@ -1,0 +1,16 @@
+# 這是預設的參數 (我們可以想像成預設是跑在 Dev 環境)
+replicaCount: 1
+
+image:
+  # 注意：請把這裡換成你真實的 GCP Project ID 跟 Repository 網址
+  repository: us-central1-docker.pkg.dev/project-ba42a5bc-01e3-4ef3-ab9/cloud-platform-repo/cloud-platform-lab
+  tag: "v2"
+
+# 用來控制要不要啟用特定的資源
+ingress:
+  enabled: true
+hpa:
+  enabled: false  # Dev 環境省點錢，不要開自動擴縮
+  minReplicas: 2
+  maxReplicas: 5
+
