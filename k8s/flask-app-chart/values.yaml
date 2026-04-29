@@ -1,16 +1,96 @@
-# 這是預設的參數 (我們可以想像成預設是跑在 Dev 環境)
-replicaCount: 1
+# flask-app-chart/values.yaml — Flask app 專用版（已從 helm create 預設值改寫）
+# 面試說法：「我用 Helm 管理部署，dev/prod 用不同的 values file，
+#   透過 -f values-prod.yaml 覆蓋預設值，達到環境分離。」
+
+replicaCount: 2   # 至少 2 副本，確保單 Node 故障時服務不中斷
 
 image:
-  # 注意：請把這裡換成你真實的 GCP Project ID 跟 Repository 網址
   repository: us-central1-docker.pkg.dev/project-ba42a5bc-01e3-4ef3-ab9/cloud-platform-repo/cloud-platform-lab
-  tag: "v2"
+  pullPolicy: Always   # dev 環境 Always 確保拿最新；prod 改 IfNotPresent 省流量
+  tag: "latest"        # prod 環境應換成 git SHA，確保可追蹤性
 
-# 用來控制要不要啟用特定的資源
+serviceAccount:
+  create: true
+  automount: false   # 最小權限原則：除非 Pod 需要呼叫 K8s API，否則不 mount
+
+podAnnotations:
+  # 讓 Prometheus 知道這個 Pod 有 /metrics 端點（Pod annotation scrape 模式）
+  # 注意：我們用 ServiceMonitor，這個 annotation 只是補充說明用
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true    # Security best practice：不以 root 身份執行
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true   # 防止 container 在執行期間修改 filesystem
+  capabilities:
+    drop:
+    - ALL   # 移除所有 Linux capabilities，最小攻擊面
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+  name: http   # ServiceMonitor 靠這個 name 找到 port，必須存在！
+  annotations:
+    cloud.google.com/neg: '{"ingress": true}'   # Container-native LB
+
 ingress:
   enabled: true
-hpa:
-  enabled: false  # Dev 環境省點錢，不要開自動擴縮
+  className: "gce"
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+  hosts:
+    - host: ""
+      paths:
+        - path: /*
+          pathType: ImplementationSpecific
+  tls: []
+
+resources:
+  requests:
+    cpu: "250m"     # 0.25 core — Scheduler 依此做 bin-packing
+    memory: "512Mi"
+  limits:
+    cpu: "500m"     # 超過 → throttle（不殺 Pod）
+    memory: "512Mi" # 超過 → OOMKilled（Pod 重啟）
+
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 10   # Gunicorn 啟動需要幾秒
+  periodSeconds: 15
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  failureThreshold: 3
+
+autoscaling:
+  enabled: true
   minReplicas: 2
   maxReplicas: 5
+  targetCPUUtilizationPercentage: 50   # 打 /load 後會觸發 scale out
 
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ── Prometheus ServiceMonitor（自訂欄位，需要在 templates 裡處理）
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  interval: "15s"
+  path: /metrics
+  labels:
+    release: prometheus   # 必須跟 kube-prometheus-stack 的 serviceMonitorSelector 對應

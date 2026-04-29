@@ -1,0 +1,49 @@
+# Loki + Promtail 輕量安裝設定
+# 安裝指令：
+#   helm repo add grafana https://grafana.github.io/helm-charts
+#   helm repo update
+#   helm upgrade --install loki grafana/loki-stack \
+#     --namespace monitoring \
+#     --create-namespace \
+#     -f k8s/loki-values.yaml
+
+loki:
+  enabled: true
+  # 單機模式，適合 lab 環境
+  # 面試重點：生產環境用 loki-distributed（microservice 模式），
+  # 分離 ingester / querier / distributor，可獨立擴展
+  isDefault: false   # ← 改成 false！Prometheus 才是 default，只能有一個
+  # 資料保留 7 天，lab 用不著太長
+  config:
+    limits_config:
+      retention_period: 168h   # 7 days
+
+promtail:
+  enabled: true
+  # Promtail 是 DaemonSet，每個 Node 跑一個
+  # 自動抓取 /var/log/pods/ 下所有 Pod 的 stdout/stderr
+  # 面試重點：Promtail vs Fluentd vs Vector 的選擇
+  #   Promtail: Loki 原生，輕量，只做 log shipping
+  #   Fluentd:  功能豐富，plugin 生態豐富，但較重
+  #   Vector:   Rust 寫的，效能最好，支援 log + metrics + traces
+  config:
+    snippets:
+      # 自訂 pipeline stage：從 Pod label 加入 namespace/pod/container 標籤
+      # 這讓 LogQL 可以 filter by namespace, pod name 等
+      pipelineStages:
+        - docker: {}
+        - match:
+            selector: '{app="flask-app"}'
+            stages:
+              - regex:
+                  # 擷取 log level（如果 app 有結構化 log 更好）
+                  expression: '(?P<level>INFO|WARNING|ERROR|CRITICAL)'
+              - labels:
+                  level:
+
+grafana:
+  # 讓 loki-stack 不要自己裝 Grafana（我們用 kube-prometheus-stack 的）
+  enabled: false
+  # 在 kube-prometheus-stack 的 Grafana 加 Loki datasource 的方式：
+  # 到 Grafana UI → Configuration → Data Sources → Add data source → Loki
+  # URL: http://loki.monitoring.svc.cluster.local:3100

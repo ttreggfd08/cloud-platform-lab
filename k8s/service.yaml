@@ -1,16 +1,23 @@
+# Service 補上 port name，讓 ServiceMonitor 的 port: http 能對應到
 apiVersion: v1
 kind: Service
 metadata:
   name: flask-app-service
-  # 這個 annotation 是為了讓 GKE 的 Ingress 可以直接將流量打到 Pod 上 (NEG 機制)
-  # 這是 GKE Best Practice 之一，能減少一層 Iptables 的延遲
+  labels:
+    # 這個 label 必須存在，ServiceMonitor 的 selector.matchLabels 對應它
+    app: flask-app
   annotations:
+    # GKE NEG（Network Endpoint Group）：讓 Ingress 流量直達 Pod，
+    # 繞過 kube-proxy 的 iptables 轉發，降低延遲
+    # 面試問：「GKE 的 Ingress 跟其他 K8s 的 Ingress 有什麼不同？」
+    # 答：「GKE 預設使用 GCLB（Google Cloud Load Balancer）作為 Ingress 控制器，
+    #      並透過 NEG 讓流量直達 Pod，不需要 NodePort 的 SNAT，效能更好。」
     cloud.google.com/neg: '{"ingress": true}'
 spec:
   type: ClusterIP
   selector:
     app: flask-app
   ports:
-  - port: 80
+  - name: http          # ← 補上 name，ServiceMonitor 靠這個 name 找到 port
+    port: 80
     targetPort: 8080
-

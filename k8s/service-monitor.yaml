@@ -1,0 +1,36 @@
+# ─────────────────────────────────────────────────────────────────────────
+# ServiceMonitor — Day 7 核心任務
+#
+# 這個 CRD 是 Prometheus Operator 的關鍵機制：
+#   - 不用改 prometheus.yaml，Operator 自動發現並加入 scrape config
+#   - selector.matchLabels 必須對應到 Service 的 labels
+#   - 這是「Operator Pattern」的標準實作方式
+#
+# 面試被問：「你怎麼讓 Prometheus 抓到你自己的 app？」
+#   答：「透過 ServiceMonitor CRD。Prometheus Operator watch 這個 CR，
+#         自動把 flask-app-service 的 /metrics 加進 scrape config，
+#         我完全不需要手動改 prometheus.yaml。」
+# ─────────────────────────────────────────────────────────────────────────
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: flask-app-monitor
+  namespace: monitoring          # 必須跟 kube-prometheus-stack 同 namespace
+  labels:
+    # 這個 label 必須對應到 kube-prometheus-stack 的 serviceMonitorSelector
+    # 預設 release label 是 prometheus（即 helm install 時的 release name）
+    release: prometheus
+spec:
+  # 選取哪個 namespace 的 Service
+  namespaceSelector:
+    matchNames:
+      - default
+  # 選取哪個 Service（對應 service.yaml 的 metadata.labels）
+  selector:
+    matchLabels:
+      app: flask-app
+  endpoints:
+    - port: http          # 對應 service.yaml 裡 ports[].name
+      path: /metrics
+      interval: 15s       # 每 15 秒 scrape 一次
+      scrapeTimeout: 10s

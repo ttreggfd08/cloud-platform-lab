@@ -1,0 +1,97 @@
+# ─────────────────────────────────────────────────────────────────────────
+# PrometheusRule — 兩條告警規則
+#
+# 面試被問：「你怎麼設定告警？」
+#   答：「用 PrometheusRule CRD。Prometheus Operator 監聽這個 CR，
+#         自動把規則載入到 Prometheus 的 alerting rules 裡。
+#         alert 觸發後，Alertmanager 負責 routing 到 Slack/PagerDuty。」
+#
+# 關鍵概念：
+#   expr:  PromQL 表達式，這是「告警邏輯」的核心
+#   for:   狀態持續多久才真的觸發（避免瞬間抖動導致誤報）
+#   labels: 用來 route 到對的 Alertmanager receiver
+#   annotations: 告警內容的人類可讀描述
+# ─────────────────────────────────────────────────────────────────────────
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: flask-app-alerts
+  namespace: monitoring
+  labels:
+    release: prometheus     # 必須跟 kube-prometheus-stack 的 ruleSelector 對應
+spec:
+  groups:
+  - name: flask-app.rules
+    interval: 30s
+    rules:
+
+    # ── 告警 1：Pod 頻繁重啟 ───────────────────────────────────────────
+    # 用途：早期發現 CrashLoopBackOff，比等 on-call 工程師發現快得多
+    # PromQL 解析：
+    #   kube_pod_container_status_restarts_total → kube-state-metrics 提供的 counter
+    #   rate(...[5m]) → 計算過去 5 分鐘的每秒重啟速率
+    #   * 60 * 5    → 換算成 5 分鐘內的重啟次數（rate × 時間窗口秒數）
+    #   > 3         → 超過 3 次才觸發
+    - alert: PodFrequentRestart
+      expr: |
+        rate(kube_pod_container_status_restarts_total{
+          namespace="default",
+          pod=~"flask-app.*"
+        }[5m]) * 60 * 5 > 3
+      for: 2m
+      labels:
+        severity: warning
+        team: platform
+      annotations:
+        summary: "Pod {{ $labels.pod }} 頻繁重啟"
+        description: |
+          Pod {{ $labels.pod }} 在過去 5 分鐘內重啟超過 3 次。
+          目前重啟次數：{{ $value | humanize }}
+          請檢查：kubectl logs {{ $labels.pod }} --previous
+
+    # ── 告警 2：HPA 已達最大副本數 ────────────────────────────────────
+    # 用途：HPA maxReplicas 被打滿代表 scaling 上限到頂，
+    #       需要評估是否調高 maxReplicas 或進行容量規劃
+    # PromQL 解析：
+    #   kube_horizontalpodautoscaler_status_current_replicas → 目前實際副本數
+    #   kube_horizontalpodautoscaler_spec_max_replicas       → spec 設定的上限
+    #   兩者相等（比值 >= 1）→ 代表已打滿
+    - alert: HPAMaxReplicasReached
+      expr: |
+        kube_horizontalpodautoscaler_status_current_replicas{
+          namespace="default",
+          horizontalpodautoscaler="flask-app-hpa"
+        }
+        >=
+        kube_horizontalpodautoscaler_spec_max_replicas{
+          namespace="default",
+          horizontalpodautoscaler="flask-app-hpa"
+        }
+      for: 5m
+      labels:
+        severity: warning
+        team: platform
+      annotations:
+        summary: "HPA {{ $labels.horizontalpodautoscaler }} 已達最大副本數"
+        description: |
+          HPA flask-app-hpa 的副本數已達上限 {{ $value }}，
+          且已持續 5 分鐘。可能需要調整 maxReplicas 或進行容量規劃。
+
+    # ── 告警 3（加碼）：高錯誤率 ─────────────────────────────────────
+    # 用途：Flask app 的 /metrics 自帶的 counter 直接拿來用
+    # PromQL：計算 5xx 錯誤率，超過 5% 就告警
+    - alert: HighErrorRate
+      expr: |
+        rate(flask_request_count_total{status_code=~"5.."}[5m])
+        /
+        rate(flask_request_count_total[5m])
+        > 0.05
+      for: 2m
+      labels:
+        severity: critical
+        team: platform
+      annotations:
+        summary: "Flask app 錯誤率過高"
+        description: |
+          Flask app 的 5xx 錯誤率為 {{ $value | humanizePercentage }}，
+          超過 5% 告警閾值，請立即檢查。

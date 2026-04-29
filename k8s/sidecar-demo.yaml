@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sidecar-interview-demo
+spec:
+  # 核心魔法 1：宣告一個可以在 Container 之間互通的「共享資料夾」
+  volumes:
+  - name: shared-logs
+    emptyDir: {}
+    
+  # 核心魔法 2：前鋒部隊 (Init Container) - 負責整地
+  initContainers:
+  - name: init-setup
+    image: busybox
+    # 它一開機就寫入一段 Html 標題，寫完立刻結束任務 (Exit 0)
+    command: ['sh', '-c', 'echo "<h1>System Boot Log:</h1>" > /var/log/app/index.html']
+    volumeMounts:
+    - name: shared-logs
+      mountPath: /var/log/app
+
+  containers:
+  # 核心魔法 3：主程式 (模擬一個業務繁重的後端)
+  - name: backend-generator
+    image: busybox
+    # 它不在乎別人怎麼看它，它只管死命地每 3 秒把最新時間塞進硬碟裡
+    command: ['sh', '-c', 'while true; do echo "<br>Access detected at $(date)" >> /var/log/app/index.html; sleep 3; done']
+    volumeMounts:
+    - name: shared-logs
+      mountPath: /var/log/app
+
+  # 核心魔法 4：邊車程式 (Sidecar Pattern)
+  - name: nginx-sidecar
+    image: nginx
+    ports:
+    - containerPort: 80
+    # 巧妙之處：Nginx 把別人的 Log 資料夾，當成自己的網頁首頁來對外廣播！
+    volumeMounts:
+    - name: shared-logs
+      mountPath: /usr/share/nginx/html
+
